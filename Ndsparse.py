@@ -1,15 +1,11 @@
-# -*- coding: utf-8 -*-
-# <nbformat>3.0</nbformat>
 
-# <headingcell level=1>
+# coding: utf-8
 
-# Ndsparse matrix implementation in Python
+## Ndsparse matrix implementation in Python
 
-# <headingcell level=2>
+### Definition of Ndsparse class
 
-# Definition of Ndsparse class
-
-# <codecell>
+# In[12]:
 
 class Ndsparse:
     """
@@ -33,11 +29,13 @@ class Ndsparse:
                 # Make sure all indexes in keys are ints
                 # Make sure all vals in dict are numbers
                 self.entries = args[0]
-                self.d = len(args[0].iterkeys().next())
+                self.d = len(self.entries.iterkeys().next())
         
-            # NDsparse from list of lists (of lists...)
+            # NDsparse from list of lists (of lists...) dense format
+            # 1st dim = rows, 2nd dim = cols, 3rd dim = pages, ...
             else:
-                pass
+                self.entries = buildEntriesDictFromNestedLists(args[0])
+                self.d = len(self.entries.iterkeys().next())
                 
         # Catch unsupported initialization
         else:
@@ -49,9 +47,13 @@ class Ndsparse:
         """
         return Ndsparse(self.entries)
         
-    def __str__(self):
-        # Make this nicer: N=N matrix with entries...
-        return str(self.entries)
+    def __repr__(self):
+        # Should sort this...
+        rep = []
+        rep.append(''.join([str(self.d),'-d sparse tensor with ', str(self.nnz()), ' nonzero entries\n']))
+        for pos,val in self.entries.iteritems():
+            rep.append(''.join([str(pos),'\t',str(val),'\n']))
+        return ''.join(rep)
     
     def nnz(self):
         """
@@ -214,15 +216,65 @@ def permute(vec,permutation):
     """
     return tuple([vec[permutation[i]] for i in range(len(vec))])
 
-# <headingcell level=2>
+def traverseWithIndices(o, tree_types=(list, tuple)):
+    """
+    Traverse over tree structure (lists of lists of ...), with indices. Returns a nested lists of lists, each containing
+    the next position on the end. Call flatten to get into a nice form.
+    """
+    idxs = ()
+    if isinstance(o, tree_types):
+        for idx,value in enumerate(o):
+            idxs = idxs[0:-1]
+            idxs = idxs + (idx,)
+            for subvalue in traverseWithIndices(value):
+                yield [subvalue,idxs]
+    else:
+        yield [o,idxs]
+        
+def flatten(l):
+    '''
+    Flatten a arbitrarily nested lists and return the result as a single list.
+    '''
+    ret = []
+    for i in l:
+        if isinstance(i, list) or isinstance(i, tuple):
+            ret.extend(flatten(i))
+        else:
+            ret.append(i)
+    return ret
 
-# Testing Ndsparse class
+def buildEntriesDictFromNestedLists(nestedLists):
+    """
+    Build dict of pos:val pairs for Ndsparse.entries format from a flat list where list[0] is
+    the val and list[1:-1] are the pos indices in reverse order.
+    """
+    entriesDict = {}
+    for entry in traverseWithIndices(nestedLists):
+        flatEntry = flatten(entry)
+        pos = tuple(flatEntry[-1:0:-1])
+        val = flatEntry[0]
+        entriesDict[pos] = val
+    return entriesDict
 
-# <headingcell level=3>
 
-# 2-D Matrix Testing
+### Testing Ndsparse class
 
-# <codecell>
+### Initialization Testing
+
+# In[13]:
+
+A = [[[1,7,3], [2,8,4]], [[3,9,5], [4,0,6]], [[5,1,7], [6,2,8]], [[0,1,9], [1,0,3]]]
+B = [[[5,1],[7,0],[8,4],[0,4]], [[0,3],[1,5],[9,6],[1,2]], [[4,9],[3,8],[6,7],[2,0]]]
+print A
+print B
+A[0][0][0].__class__.__name__
+As = Ndsparse(A)
+print As
+
+
+#### 2-D Matrix Testing
+
+# In[14]:
 
 x = {(0,0): 1, (2,1): 3, (1,2): 2}
 y = {(1,0): 1, (2,0): 3, (0,1): 1, (0,2): 2}
@@ -233,15 +285,12 @@ print b
 c = a*b
 print c
 
-# <headingcell level=3>
 
-# N-D Matrix Testing
+#### N-D Matrix Testing
 
-# <rawcell>
-
-# Need a 3rd party worked example for 3 dims
-
-# <codecell>
+                Need a 3rd party worked example for 3 dims
+                
+# In[15]:
 
 a1 = {(0,0,0): 3.14, (1,2,3): 4.25, (3,4,5): 2.34}
 a2 = {(0,0,0): 4.36, (3,2,0): 3.25, (4,4,1): 1.34}
@@ -252,11 +301,10 @@ print r
 s = q.contract(r,1,0)
 print s
 
-# <headingcell level=2>
 
-# Misc Testing
+### Misc Testing
 
-# <codecell>
+# In[16]:
 
 tem = {}
 tel = {(0,0): 4098, (1,2): 4139}
@@ -268,12 +316,15 @@ print tel
 print tem.viewkeys() & tel.viewkeys()
 print tem.viewkeys()
 
-# <codecell>
+
+# In[17]:
 
 single = Ndsparse({(): 3.14})
 print single
 print single.d
 
-# <codecell>
+
+# In[ ]:
+
 
 
