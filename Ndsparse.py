@@ -1,12 +1,3 @@
-
-# coding: utf-8
-
-## Ndsparse matrix implementation in Python
-
-### Definition of Ndsparse class
-
-# In[12]:
-
 class Ndsparse:
     """
     N-dimensional sparse matrix.
@@ -21,9 +12,13 @@ class Ndsparse:
         Constructor
         """
         if len(args) == 1:
+            # NDsparse from a single scalar
+            if isinstance(args[0], (int, long, float, complex)):
+                self.entries = {():args[0]}
+                self.d = 0
             
             # NDsparse from dict of pos,val pairs
-            if args[0].__class__.__name__ == 'dict':
+            elif args[0].__class__.__name__ == 'dict':
                 # Error handling:
                 # Make sure all keys in dict are same length
                 # Make sure all indexes in keys are ints
@@ -40,6 +35,9 @@ class Ndsparse:
         # Catch unsupported initialization
         else:
             raise Exception("Improper Ndsparse construction.")
+        
+        # Cleanup
+        self.removeZeros()
     
     def copy(self):
         """
@@ -48,13 +46,17 @@ class Ndsparse:
         return Ndsparse(self.entries)
         
     def __repr__(self):
-        # Should sort this...
+        """
+        String representation of Ndsparse class
+        """
         rep = []
         rep.append(''.join([str(self.d),'-d sparse tensor with ', str(self.nnz()), ' nonzero entries\n']))
-        for pos,val in self.entries.iteritems():
-            rep.append(''.join([str(pos),'\t',str(val),'\n']))
+        poss = self.entries.keys()
+        poss.sort()
+        for pos in poss:
+            rep.append(''.join([str(pos),'\t',str(self.entries[pos]),'\n']))
         return ''.join(rep)
-    
+
     def nnz(self):
         """
         Number of nonzero entries. Number of indexed entries if no explicit 0's allowed.
@@ -81,7 +83,17 @@ class Ndsparse:
         overlap = selfKeys & otherKeys
         selfFree = selfKeys.difference(otherKeys)
         otherFree = otherKeys.difference(selfKeys)
-        return (overlap, selfFree, otherFree) 
+        return (overlap, selfFree, otherFree)
+    
+    def removeZeros(self):
+        """
+        Remove explicit 0 entries in Ndsparse matrix
+        """
+        newEntries = {}
+        for pos,val in self.entries.iteritems():
+            if val != 0:
+                newEntries[pos] = val
+        self.entries = newEntries
         
     def __add__(self,other):
         """
@@ -117,7 +129,7 @@ class Ndsparse:
         
         return Ndsparse(out)
     
-    def elementwiseMultiply(self,other):
+    def __mul__(self,other):
         """
         Elementwise multiplication of self .* other.
         """
@@ -127,6 +139,19 @@ class Ndsparse:
         
         for pos in overlap:
             out[pos] = self.entries[pos] * other.entries[pos]
+        
+        return Ndsparse(out)
+    
+    def __div__(self,other):
+        """
+        Elementwise division of self ./ other, casting ints to floats.
+        """
+        # Error handling: make sure Dims are same
+        overlap, selfFree, otherFree = self.mergePositions(other)
+        out = {}
+        
+        for pos in overlap:
+            out[pos] = float(self.entries[pos]) / other.entries[pos]
         
         return Ndsparse(out)
     
@@ -172,15 +197,42 @@ class Ndsparse:
                 out[pos] += val
         
         return Ndsparse(out)
+    
+    def outerProduct(self,other):
+        """
+        Outer product
+        Result index order: (selfIdxs, otherIdxs)
+        Note: scalar multiplication is an outer product
+        """
+        # Accumulate nonzero positions 
+        terms = [] # list of tuples of (pos tuple, val) to sum
         
-    def __mul__(self,other):
+        for pos1,val1 in self.entries.iteritems():
+            for pos2,val2 in other.entries.iteritems():
+                    val = val1 * val2
+                    pos = tuple(pos1+pos2)
+                    terms.append((pos,val))
+        
+        # Sum entries
+        out = {}
+        for entry in terms:
+            pos = entry[0]
+            val = entry[1]
+            if pos not in out:
+                out[pos] = val
+            else:
+                out[pos] += val
+        
+        return Ndsparse(out)
+    
+    def ttt(self,other,*args):
         """
-        Matrix multiplication for N=2. Special case of contract, with self(i,k).other(k,j)
-            contracted over k, which has indices 1 and 0, for self and other, respectively
-        [Should apply to N>2, this is called the canonical contraction?]
+        Tensor x tensor generalized multiplication. Should include inner and outer products and contraction.
+        Outer product: Contract on no dims
+        Inner product: Contract on all dims (specify order)
+        Product with contraction on arbitrary dimensions also
         """
-        # Error handling: make sure both matrices are N=2
-        return self.contract(other,1,0)
+        pass
     
     def transpose(self,permutation):
         """
@@ -197,7 +249,7 @@ class Ndsparse:
             out[permute(key,permutation)] = value
         self.entries = out
         
-    def kron(self,other):
+    def kroneckerProduct(self,other):
         """
         Kronecker product of self (x) other
         Only applies to 2D matrices? Completely obviated by general N-d implementation?
@@ -216,38 +268,43 @@ def permute(vec,permutation):
     """
     return tuple([vec[permutation[i]] for i in range(len(vec))])
 
-def traverseWithIndices(o, tree_types=(list, tuple)):
+def traverseWithIndices(superList, treeTypes=(list, tuple)):
     """
     Traverse over tree structure (lists of lists of ...), with indices. Returns a nested lists of lists, each containing
     the next position on the end. Call flatten to get into a nice form.
     """
-    idxs = ()
-    if isinstance(o, tree_types):
-        for idx,value in enumerate(o):
+    idxs = []
+    if isinstance(superList, treeTypes):
+        for idx,value in enumerate(superList):
             idxs = idxs[0:-1]
-            idxs = idxs + (idx,)
-            for subvalue in traverseWithIndices(value):
-                yield [subvalue,idxs]
+            idxs.append(idx)
+            for subValue in traverseWithIndices(value):
+                yield [subValue,idxs]
     else:
-        yield [o,idxs]
+        yield [superList,idxs]
         
-def flatten(l):
+def flatten(superList, treeTypes=(list, tuple)):
     '''
-    Flatten a arbitrarily nested lists and return the result as a single list.
+    Flatten arbitrarily nested lists into a single list.
     '''
-    ret = []
-    for i in l:
-        if isinstance(i, list) or isinstance(i, tuple):
-            ret.extend(flatten(i))
+    flatList = []
+    for subList in superList:
+        if isinstance(subList, treeTypes):
+            flatList.extend(flatten(subList))
         else:
-            ret.append(i)
-    return ret
+            flatList.append(subList)
+    return flatList
 
 def buildEntriesDictFromNestedLists(nestedLists):
     """
     Build dict of pos:val pairs for Ndsparse.entries format from a flat list where list[0] is
     the val and list[1:-1] are the pos indices in reverse order.
     """
+    # Special case for scalar in a list
+    #    Warning: first dim shouldn't be singleton
+    if len(nestedLists) == 1:
+        return {():nestedLists[0]}
+    
     entriesDict = {}
     for entry in traverseWithIndices(nestedLists):
         flatEntry = flatten(entry)
@@ -256,75 +313,19 @@ def buildEntriesDictFromNestedLists(nestedLists):
         entriesDict[pos] = val
     return entriesDict
 
-
-### Testing Ndsparse class
-
-### Initialization Testing
-
-# In[13]:
-
-A = [[[1,7,3], [2,8,4]], [[3,9,5], [4,0,6]], [[5,1,7], [6,2,8]], [[0,1,9], [1,0,3]]]
-B = [[[5,1],[7,0],[8,4],[0,4]], [[0,3],[1,5],[9,6],[1,2]], [[4,9],[3,8],[6,7],[2,0]]]
-print A
-print B
-A[0][0][0].__class__.__name__
-As = Ndsparse(A)
-print As
-
-
-#### 2-D Matrix Testing
-
-# In[14]:
-
-x = {(0,0): 1, (2,1): 3, (1,2): 2}
-y = {(1,0): 1, (2,0): 3, (0,1): 1, (0,2): 2}
-a = Ndsparse(x)
-b = Ndsparse(y)
-print a
-print b
-c = a*b
-print c
-
-
-#### N-D Matrix Testing
-
-                Need a 3rd party worked example for 3 dims
-                
-# In[15]:
-
-a1 = {(0,0,0): 3.14, (1,2,3): 4.25, (3,4,5): 2.34}
-a2 = {(0,0,0): 4.36, (3,2,0): 3.25, (4,4,1): 1.34}
-q = Ndsparse(a1)
-r = Ndsparse(a2)
-print q
-print r
-s = q.contract(r,1,0)
-print s
-
-
-### Misc Testing
-
-# In[16]:
-
-tem = {}
-tel = {(0,0): 4098, (1,2): 4139}
-
-tem.update(tel)
-print tem
-tel.update({(0,3): 1234})
-print tel
-print tem.viewkeys() & tel.viewkeys()
-print tem.viewkeys()
-
-
-# In[17]:
-
-single = Ndsparse({(): 3.14})
-print single
-print single.d
-
-
-# In[ ]:
-
-
-
+# Testing code
+if __name__ == "__main__":
+    Al = [[[1,7,3], [2,8,4]], [[3,9,5], [4,0,6]], [[5,1,7], [6,2,8]], [[0,1,9], [1,0,3]]]
+    Bl = [[[5,1],[7,0],[8,4],[0,4]], [[0,3],[1,5],[9,6],[1,2]], [[4,9],[3,8],[6,7],[2,0]]]
+    print Al
+    print Bl
+    A = Ndsparse(Al)
+    B = Ndsparse(Bl)
+    print A
+    print B
+    #C = A.outerProduct(B)
+    #print C
+    D = Ndsparse(6)
+    print D
+    E = A.outerProduct(D)
+    print E
