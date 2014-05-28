@@ -10,27 +10,35 @@ class Ndsparse:
     def __init__(self, *args, **kwargs):
         """
         Constructor
+        NDsparse(scalar)
+        NDsparse(dict of (pos):val pairs, optional list of dims for shape)
+        NDsparse(nested list dense representation)
         """
-        if len(args) == 1:
-            # NDsparse from a single scalar
-            if isinstance(args[0], (int, long, float, complex)):
-                self.entries = {():args[0]}
-                self.d = 0
-            
-            # NDsparse from dict of pos,val pairs
-            elif args[0].__class__.__name__ == 'dict':
-                # Error handling:
-                # Make sure all keys in dict are same length
-                # Make sure all indexes in keys are ints
-                # Make sure all vals in dict are numbers
-                self.entries = args[0]
-                self.d = len(self.entries.iterkeys().next())
+        # NDsparse from a single scalar
+        if isinstance(args[0], (int, long, float, complex)):
+            self.entries = {():args[0]}
+            self.d = 0
+            self.shape = ()
         
-            # NDsparse from list of lists (of lists...) dense format
-            # 1st dim = rows, 2nd dim = cols, 3rd dim = pages, ...
+        # NDsparse from dict of pos,val pairs
+        elif args[0].__class__.__name__ == 'dict':
+            # Error handling:
+            # Make sure all keys in dict are same length
+            # Make sure all indexes in keys are ints
+            # Make sure all vals in dict are numbers
+            self.entries = args[0]
+            self.d = len(self.entries.iterkeys().next())
+            if len(args) > 1:
+                self.shape = args[1]
             else:
-                self.entries = buildEntriesDictFromNestedLists(args[0])
-                self.d = len(self.entries.iterkeys().next())
+                self.shape = getEntriesShape(args[0])
+    
+        # NDsparse from list of lists (of lists...) dense format
+        # 1st dim = rows, 2nd dim = cols, 3rd dim = pages, ...
+        elif args[0].__class__.__name__ == 'list':
+            self.entries = buildEntriesDictFromNestedLists(args[0])
+            self.d = len(self.entries.iterkeys().next())
+            self.shape = getListsShape(args[0])
                 
         # Catch unsupported initialization
         else:
@@ -95,6 +103,15 @@ class Ndsparse:
                 newEntries[pos] = val
         self.entries = newEntries
         
+    def __eq__(self,other):
+        """
+        Test equality of 2 Ndsparse objects. Must have the same nonzero elements, rank, and dimensions.
+        """
+        if self.d == other.d and self.shape == other.shape and self.entries == other.entries:
+            return True
+        else:
+            return False
+        
     def __add__(self,other):
         """
         Elementwise addition of self + other.
@@ -110,7 +127,7 @@ class Ndsparse:
         for pos in otherFree:
             out[pos] = other.entries[pos]
         
-        return Ndsparse(out)
+        return Ndsparse(out,self.shape)
         
     def __sub__(self,other):
         """
@@ -127,7 +144,7 @@ class Ndsparse:
         for pos in otherFree:
             out[pos] = -other.entries[pos]
         
-        return Ndsparse(out)
+        return Ndsparse(out,self.shape)
     
     def __mul__(self,other):
         """
@@ -140,11 +157,11 @@ class Ndsparse:
         for pos in overlap:
             out[pos] = self.entries[pos] * other.entries[pos]
         
-        return Ndsparse(out)
+        return Ndsparse(out,self.shape)
     
     def __div__(self,other):
         """
-        Elementwise division of self ./ other, casting ints to floats.
+        Elementwise division of nonzero entries of self ./ other, casting ints to floats.
         """
         # Error handling: make sure Dims are same
         overlap, selfFree, otherFree = self.mergePositions(other)
@@ -153,86 +170,97 @@ class Ndsparse:
         for pos in overlap:
             out[pos] = float(self.entries[pos]) / other.entries[pos]
         
-        return Ndsparse(out)
+        return Ndsparse(out,self.shape)
     
-    def contract(self,other,selfDim,otherDim):
+    def matrixProduct(self,other):
         """
-        Tensor contraction/matrix multiplication of self . other
-        selfDim, otherDim: dimension of each matrix to contract
-        Single index contraction for now
-        Result index order: (selfIdxs\selfDim, otherIdxs\otherDim)
-            Can transpose after to get what you want
-        Time complexity: O(self.nnz * other.nnz)
+        Standard 2-d matrix multiply using ttt
         """
-        # Error handling: make sure Dims are present, contraction is proper
-        
-        # Accumulate nonzero positions 
-        terms = [] # list of tuples of (pos tuple, val) to sum
-        
-        for pos1,val1 in self.entries.iteritems():
-            
-            con_idx1 = pos1[selfDim] # contracted index of self
-            keep_idx1 = list(pos1)
-            keep_idx1.remove(con_idx1) # first part of out pos
-            
-            for pos2,val2 in other.entries.iteritems():
-                
-                con_idx2 = pos2[otherDim] # contracted index of other
-                keep_idx2 = list(pos2)
-                keep_idx2.remove(con_idx2) # second part of out pos
-                
-                if con_idx1 == con_idx2: # Match entries that share contraction index
-                    val = val1 * val2
-                    pos = tuple(keep_idx1 + keep_idx2)
-                    terms.append((pos,val))
-        
-        # Sum entries
-        out = {}
-        for entry in terms:
-            pos = entry[0]
-            val = entry[1]
-            if pos not in out:
-                out[pos] = val
-            else:
-                out[pos] += val
-        
-        return Ndsparse(out)
+        assert self.d == 2 and other.d == 2, 'Matrices are wrong dimension for usual multiplication.'
+        return self.ttt(other,[1],[0])
     
     def outerProduct(self,other):
         """
-        Outer product
-        Result index order: (selfIdxs, otherIdxs)
-        Note: scalar multiplication is an outer product
+        Outer product using ttt
         """
-        # Accumulate nonzero positions 
-        terms = [] # list of tuples of (pos tuple, val) to sum
+        return self.ttt(other)
+    
+    def kroneckerProduct(self,other):
+        """
+        Kronecker product of 2-d matrices using ttt and rearranging indices
+        """
+        assert self.d == 2 and other.d == 2, 'Matrices are wrong dimension for kronecker product.'
+        prod = self.ttt(other)
         
-        for pos1,val1 in self.entries.iteritems():
-            for pos2,val2 in other.entries.iteritems():
-                    val = val1 * val2
-                    pos = tuple(pos1+pos2)
-                    terms.append((pos,val))
+        # Dimensions: self(m x n) (x) other(p x q) = kprod(mp x nq)
+        m = self.shape[0]
+        n = self.shape[1]
+        p = other.shape[0]
+        q = other.shape[1]
         
-        # Sum entries
-        out = {}
-        for entry in terms:
-            pos = entry[0]
-            val = entry[1]
-            if pos not in out:
-                out[pos] = val
-            else:
-                out[pos] += val
-        
-        return Ndsparse(out)
+        # Modify indices
+        kprod = {}
+        for pos,val in prod.entries.iteritems():
+            i = p*pos[0] + pos[2] + 1
+            j = q*pos[1] + pos[3] + 1
+            kprod[(i-1,j-1)] = val
+            
+        return Ndsparse(kprod,[m*p,n*q])
     
     def ttt(self,other,*args):
         """
         Tensor x tensor generalized multiplication. Should include inner and outer products and contraction.
+        Specify contraction dims with 1 list of dims in order for self followed by 1 list of dims in order for other
+        
         Outer product: Contract on no dims
         Inner product: Contract on all dims (specify order)
         Product with contraction on arbitrary dimensions also
+        
+        Result index order: (selfIdxs\selfDim, otherIdxs\otherDim)
+        Time complexity: O(self.nnz * other.nnz)
         """
-        pass
+        
+        if len(args) == 0: # no contractions/outer product
+            selfDims = []
+            otherDims = []
+        elif len(args) == 2: # contractions specified
+            selfDims = args[0]
+            otherDims = args[1]
+            # Error handling: make sure Dims are present, contraction is proper, same lengths
+        else:
+            raise Exception("ttt requires 1 or 3 args.")
+            
+        # Accumulate nonzero positions 
+        terms = [] # list of tuples of (pos tuple, val) to sum
+        
+        for pos1,val1 in self.entries.iteritems():
+            
+            conIdx1s = [ item for i,item in enumerate(pos1) if i in selfDims ] # self's contracted indices
+            keepIdx1s = [ item for i,item in enumerate(pos1) if i not in selfDims ] # self's kept indices
+            
+            for pos2,val2 in other.entries.iteritems():
+                
+                conIdx2s = [ item for i,item in enumerate(pos2) if i in otherDims ] # other's contracted indices
+                keepIdx2s = [ item for i,item in enumerate(pos2) if i not in otherDims ] # other's kept indices
+                
+                pos = tuple(keepIdx1s + keepIdx2s)
+                
+                if conIdx1s == conIdx2s: # Match entries that share contraction index (including none)
+                    terms.append((pos, val1*val2))
+        
+        # Sum entries
+        out = {}
+        for entry in terms:
+            pos = entry[0]
+            val = entry[1]
+            if pos not in out:
+                out[pos] = val
+            else:
+                out[pos] += val
+        
+        shape = [ item for i,item in enumerate(self.shape) if i not in selfDims ] + \
+                [ item for i,item in enumerate(other.shape) if i not in otherDims ]
+        return Ndsparse(out,shape)
     
     def transpose(self,permutation):
         """
@@ -248,13 +276,6 @@ class Ndsparse:
         for key,value in self.entries.iteritems():
             out[permute(key,permutation)] = value
         self.entries = out
-        
-    def kroneckerProduct(self,other):
-        """
-        Kronecker product of self (x) other
-        Only applies to 2D matrices? Completely obviated by general N-d implementation?
-        """
-        pass
     
     def reshape(self,shapemat):
         """
@@ -270,8 +291,9 @@ def permute(vec,permutation):
 
 def traverseWithIndices(superList, treeTypes=(list, tuple)):
     """
-    Traverse over tree structure (lists of lists of ...), with indices. Returns a nested lists of lists, each containing
-    the next position on the end. Call flatten to get into a nice form.
+    Traverse over tree structure (nested lists), with indices. Returns a nested list 
+    with the left element a nested list and the right element the next position.
+    Call flatten to get into a nice form.
     """
     idxs = []
     if isinstance(superList, treeTypes):
@@ -285,7 +307,7 @@ def traverseWithIndices(superList, treeTypes=(list, tuple)):
         
 def flatten(superList, treeTypes=(list, tuple)):
     '''
-    Flatten arbitrarily nested lists into a single list.
+    Flatten arbitrarily nested lists into a single list, removing empty lists.
     '''
     flatList = []
     for subList in superList:
@@ -313,6 +335,28 @@ def buildEntriesDictFromNestedLists(nestedLists):
         entriesDict[pos] = val
     return entriesDict
 
+def getListsShape(nestedLists, treeTypes=(list, tuple)):
+    """
+    Get dimensions of nested lists
+    """
+    shape = []
+    lst = list(nestedLists)
+    while isinstance(lst, treeTypes):
+        shape.append(len(lst))
+        lst = lst[0]
+    return shape
+
+def getEntriesShape(entries):
+    """
+    Get dimensions corresponding to max indices in entries
+    """
+    maxIdxs = [0]*len(entries.iterkeys().next())
+    for pos in entries.iterkeys():
+        for i,idx in enumerate(pos):
+            if idx > maxIdxs[i]:
+                maxIdxs[i] = idx
+    return [idx+1 for idx in maxIdxs]
+
 # Testing code
 if __name__ == "__main__":
     Al = [[[1,7,3], [2,8,4]], [[3,9,5], [4,0,6]], [[5,1,7], [6,2,8]], [[0,1,9], [1,0,3]]]
@@ -323,9 +367,21 @@ if __name__ == "__main__":
     B = Ndsparse(Bl)
     print A
     print B
+    print A.shape
+    print B.shape
     #C = A.outerProduct(B)
     #print C
-    D = Ndsparse(6)
-    print D
-    E = A.outerProduct(D)
-    print E
+    #D = Ndsparse(6)
+    #print D
+    #E = A.outerProduct(D)
+    #print E
+    C = A.ttt(B,[0,1],[1,2])
+    #C = A.ttt(B)
+    #print C
+    print C.shape
+    Gl = [[1,2],[3,4]]
+    Hl = [[0,5],[6,7]]
+    G = Ndsparse(Gl)
+    H = Ndsparse(Hl)
+    print G.matrixProduct(G)
+    print G.kroneckerProduct(H)

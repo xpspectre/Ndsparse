@@ -7,7 +7,8 @@ a = Ndsparse(x)
 b = Ndsparse(y)
 print a
 print b
-
+print 'shape x:', getEntriesShape(x)
+print 'shape y:', getEntriesShape(y)
 
 a1 = {(0,0,0): 3.14, (1,2,3): 4.25, (3,4,5): 2.34}
 a2 = {(0,0,0): 4.36, (3,2,0): 3.25, (4,4,1): 1.34}
@@ -17,3 +18,8 @@ print q
 print r
 s = q.contract(r,1,0)
 print s
+
+print 'shape q:', getEntriesShape(a1)
+print 'shape e:', getEntriesShape(a2)
+print q.shape
+print r.shape
