@@ -276,6 +276,7 @@ class Ndsparse:
         for key,value in self.entries.iteritems():
             out[permute(key,permutation)] = value
         self.entries = out
+        self.shape = list(permute(self.shape,permutation))
     
     def reshape(self,shapemat):
         """
