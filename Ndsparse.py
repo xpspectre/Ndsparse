@@ -14,24 +14,46 @@ class Ndsparse:
         Ndsparse(dict of (pos):val pairs, optional list of dims for shape)
         Ndsparse(nested list dense representation)
         """
-        # Fom a single scalar
-        if isinstance(args[0], (int, float, complex)):
+        # Blank Ndsparse
+        if len(args) == 0:
+            self.entries = {}
+            self.d = 0
+            self.shape = []
+
+        # From a single scalar
+        elif isinstance(args[0], (int, float, complex)):
             self.entries = {(): args[0]}
             self.d = 0
-            self.shape = ()
+            self.shape = []
 
         # From dict of pos,val pairs
-        elif args[0].__class__.__name__ == 'dict':
-            # Error handling:
-            # Make sure all keys in dict are same length
-            # Make sure all indexes in keys are ints
-            # Make sure all vals in dict are numbers
-            self.entries = args[0]
-            self.d = len(next(iter(self.entries.keys())))
+        #   Make sure a new dict is produced for the Ndsparse
+        elif args[0].__class__.__name__ == 'dict' or args[0].__class__.__name__ == 'Ndsparse':
+            if args[0].__class__.__name__ == 'Ndsparse':
+                entries = args[0].entries
+            else:
+                entries = args[0]
+
+            self.entries = {}
+            ctr = 0
+            for pos, val in entries.items():
+                if ctr == 0:
+                    d = len(pos)
+                if not all(isinstance(x, int) for x in pos):
+                    raise IndexError('Position indices must be integers')
+                if len(pos) != d:
+                    raise IndexError('Position index dimension mismatch')
+                if not isinstance(val, (int, float, complex)):
+                    raise ValueError('Values must be numbers')
+                self.entries[pos] = val
+                ctr += 1
+
+            self.d = d
+
             if len(args) > 1:
                 self.shape = args[1]
             else:
-                self.shape = get_entries_shape(args[0])
+                self.shape = get_entries_shape(entries)
 
         # From list of lists (of lists...) dense format
         # 1st dim = rows, 2nd dim = cols, 3rd dim = pages, ...
@@ -40,9 +62,12 @@ class Ndsparse:
             self.d = len(next(iter(self.entries.keys())))
             self.shape = get_lists_shape(args[0])
 
+        elif args[0].__class__.__name__ == 'ndarray':
+            raise NotImplementedError
+
         # Catch unsupported initialization
         else:
-            raise Exception("Improper Ndsparse construction.")
+            raise TypeError("Unknown type for Ndsparse construction.")
 
         # Cleanup
         self.remove_zeros()
@@ -70,20 +95,12 @@ class Ndsparse:
         """
         return len(self.entries)
 
-    def add_entry(self, pos, val):
-        # Error handling: make sure entry doesn't overwrite existing ones
-        self.entries[pos] = val
-
-    def add_entries(self, new_entries):
-        # Error handling: make sure entries don't overwrite existing ones
-        self.entries.update(new_entries)
-
     def merge_positions(self, other):
         """
-        Return (overlap, selfFree, otherFree) 
+        Return (overlap, self_free, other_free)
             overlap: set of tuples of positions where self and other overlap
-            selfFree: set of tuples of positions where only self is nonzero
-            otherFree: set of tuples of positions where only other is nonzero
+            self_free: set of tuples of positions where only self is nonzero
+            other_free: set of tuples of positions where only other is nonzero
         """
         self_keys = set(self.entries.keys())
         other_keys = set(other.entries.keys())
@@ -102,9 +119,35 @@ class Ndsparse:
                 new_entries[pos] = val
         self.entries = new_entries
 
+    def __getitem__(self, index):
+        """Get value at tuple item"""
+        if len(index) != self.d:
+            raise IndexError('Wrong number of indices specified')
+        for i, ind in enumerate(index):
+            if ind > self.shape[i] or ind < 0:
+                raise IndexError('%i-th index is out of bounds' % (i,))
+
+        try:
+            return self.entries[index]
+        except KeyError:
+            return 0
+
+    def __setitem__(self, index, value):
+        """Set value at tuple """
+        if len(index) != self.d:
+            raise IndexError('Wrong number of indices specified')
+        for i, ind in enumerate(index):
+            if ind > self.shape[i] or ind < 0:
+                raise IndexError('%i-th index is out of bounds' % (i,))
+
+        if value == 0:  # Special case adds structural 0
+            del self.entries[index]
+        else:
+            self.entries[index] = value
+
     def __eq__(self, other):
         """
-        Test equality of 2 Ndsparse objects. Must have the same nonzero elements, rank, and dimensions.
+        Test equality of 2 Ndsparse objects by value. Must have the same nonzero elements, rank, and dimensions.
         """
         if self.d == other.d and self.shape == other.shape and self.entries == other.entries:
             return True
