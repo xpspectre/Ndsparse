@@ -222,96 +222,6 @@ class Ndsparse:
 
         return Ndsparse(out, self.shape)
 
-    def matrix_product(self, other):
-        """
-        Standard 2-d matrix multiply using ttt
-        """
-        assert self.d == 2 and other.d == 2, 'Matrices must both be 2-d for usual multiplication.'
-        return self.ttt(other, [1], [0])
-
-    def outer_product(self, other):
-        """
-        Outer product using ttt
-        """
-        return self.ttt(other)
-
-    def kronecker_product(self, other):
-        """
-        Kronecker product of 2-d matrices using ttt and rearranging indices
-        """
-        assert self.d == 2 and other.d == 2, 'Matrices must both be 2-d forkronecker product.'
-        prod = self.ttt(other)
-
-        # Dimensions: self(m x n) (x) other(p x q) = kprod(mp x nq)
-        m = self.shape[0]
-        n = self.shape[1]
-        p = other.shape[0]
-        q = other.shape[1]
-
-        # Modify indices
-        kprod = {}
-        for pos, val in prod.entries.items():
-            i = p * pos[0] + pos[2] + 1
-            j = q * pos[1] + pos[3] + 1
-            kprod[(i - 1, j - 1)] = val
-
-        return Ndsparse(kprod, (m * p, n * q))
-
-    def ttt(self, other, *args):
-        """
-        Tensor x tensor generalized multiplication. Should include inner and outer products and contraction.
-        Specify contraction dims with 1 list of dims in order for self followed by 1 list of dims in order for other
-        
-        Outer product: Contract on no dims
-        Inner product: Contract on all dims (specify order)
-        Product with contraction on arbitrary dimensions also
-        
-        Result index order: (self_inds\self_dim, other_inds\other_dim)
-        Time complexity: O(self.nnz * other.nnz)
-        """
-
-        if len(args) == 0:  # no contractions/outer product
-            self_dims = []
-            other_dims = []
-        elif len(args) == 2:  # contractions specified
-            self_dims = args[0]
-            other_dims = args[1]
-            # Error handling: make sure Dims are present, contraction is proper, same lengths
-        else:
-            raise Exception("ttt requires 1 or 3 args.")
-
-        # Accumulate nonzero positions 
-        terms = []  # list of tuples of (pos tuple, val) to sum
-
-        for pos1, val1 in self.entries.items():
-
-            con_ind1s = [item for i, item in enumerate(pos1) if i in self_dims]  # self's contracted indices
-            keep_ind1s = [item for i, item in enumerate(pos1) if i not in self_dims]  # self's kept indices
-
-            for pos2, val2 in other.entries.items():
-
-                con_ind2s = [item for i, item in enumerate(pos2) if i in other_dims]  # other's contracted indices
-                keep_ind2s = [item for i, item in enumerate(pos2) if i not in other_dims]  # other's kept indices
-
-                pos = tuple(keep_ind1s + keep_ind2s)
-
-                if con_ind1s == con_ind2s:  # Match entries that share contraction index (including none)
-                    terms.append((pos, val1 * val2))
-
-        # Sum entries
-        out = {}
-        for entry in terms:
-            pos = entry[0]
-            val = entry[1]
-            if pos not in out:
-                out[pos] = val
-            else:
-                out[pos] += val
-
-        shape = [item for i, item in enumerate(self.shape) if i not in self_dims] + \
-                [item for i, item in enumerate(other.shape) if i not in other_dims]
-        return Ndsparse(out, tuple(shape))
-
     def transpose(self, permutation=None):
         """
         Transpose Ndsparse matrix in place
@@ -359,6 +269,100 @@ def get_entries_shape(entries):
             if ind > max_inds[i]:
                 max_inds[i] = ind
     return tuple([ind + 1 for ind in max_inds])
+
+
+def matrix_product(mat1, mat2):
+    """
+    Standard 2-d matrix multiply using ttt
+    """
+    assert mat1.d == 2 and mat2.d == 2, 'Matrices must both be 2-d for usual multiplication.'
+    return ttt(mat1, mat2, [1], [0])
+
+
+def outer_product(mat1, mat2):
+    """
+    Outer product using ttt
+    """
+    return ttt(mat1, mat2)
+
+
+def kronecker_product(mat1, mat2):
+    """
+    Kronecker product of 2-d matrices using ttt and rearranging indices
+    """
+    assert mat1.d == 2 and mat2.d == 2, 'Matrices must both be 2-d for kronecker product.'
+    prod = ttt(mat1, mat2)
+
+    # Dimensions: self(m x n) (x) other(p x q) = kprod(mp x nq)
+    m = mat1.shape[0]
+    n = mat1.shape[1]
+    p = mat2.shape[0]
+    q = mat2.shape[1]
+
+    # Modify indices
+    kprod = {}
+    for pos, val in prod.entries.items():
+        i = p * pos[0] + pos[2] + 1
+        j = q * pos[1] + pos[3] + 1
+        kprod[(i - 1, j - 1)] = val
+
+    return Ndsparse(kprod, (m * p, n * q))
+
+
+def ttt(mat1, mat2, *args):
+    """
+    Tensor x tensor generalized multiplication. Should include inner and outer products and contraction.
+    Specify contraction dims with 1 list of dims in order for self followed by 1 list of dims in order for other
+
+    Outer product: Contract on no dims
+    Inner product: Contract on all dims (specify order)
+    Product with contraction on arbitrary dimensions also
+
+    Result index order: (self_inds\self_dim, other_inds\other_dim)
+    Time complexity: O(self.nnz * other.nnz)
+    """
+
+    if len(args) == 0:  # no contractions/outer product
+        self_dims = []
+        other_dims = []
+    elif len(args) == 2:  # contractions specified
+        self_dims = args[0]
+        other_dims = args[1]
+        # Error handling: make sure Dims are present, contraction is proper, same lengths
+    else:
+        raise Exception("ttt requires 1 or 3 args.")
+
+    # Accumulate nonzero positions
+    terms = []  # list of tuples of (pos tuple, val) to sum
+
+    for pos1, val1 in mat1.entries.items():
+
+        con_ind1s = [item for i, item in enumerate(pos1) if i in self_dims]  # self's contracted indices
+        keep_ind1s = [item for i, item in enumerate(pos1) if i not in self_dims]  # self's kept indices
+
+        for pos2, val2 in mat2.entries.items():
+
+            con_ind2s = [item for i, item in enumerate(pos2) if i in other_dims]  # other's contracted indices
+            keep_ind2s = [item for i, item in enumerate(pos2) if i not in other_dims]  # other's kept indices
+
+            pos = tuple(keep_ind1s + keep_ind2s)
+
+            if con_ind1s == con_ind2s:  # Match entries that share contraction index (including none)
+                terms.append((pos, val1 * val2))
+
+    # Sum entries
+    out = {}
+    for entry in terms:
+        pos = entry[0]
+        val = entry[1]
+        if pos not in out:
+            out[pos] = val
+        else:
+            out[pos] += val
+
+    shape = [item for i, item in enumerate(mat1.shape) if i not in self_dims] + \
+            [item for i, item in enumerate(mat2.shape) if i not in other_dims]
+    return Ndsparse(out, tuple(shape))
 
 
 # Testing code

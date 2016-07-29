@@ -161,8 +161,20 @@ class TestNdsparse(unittest.TestCase):
         Y = Ndsparse(Ynp)
 
         Znp = np.dot(Xnp, Ynp)
-        Z = X.matrix_product(Y)
+        Z = matrix_product(X, Y)
         self.assertEqual(Z.shape, (4, 2))
+        Znp2 = Z.to_np()
+        self.assertTrue(np.allclose(Znp, Znp2))
+
+    def test_outer_product(self):
+        Xnp = np.random.rand(4)
+        Ynp = np.random.rand(3)
+        X = Ndsparse(Xnp)
+        Y = Ndsparse(Ynp)
+
+        Znp = np.outer(Xnp, Ynp)
+        Z = outer_product(X, Y)
+        self.assertEqual(Z.shape, (4, 3))
         Znp2 = Z.to_np()
         self.assertTrue(np.allclose(Znp, Znp2))
 
@@ -173,7 +185,7 @@ class TestNdsparse(unittest.TestCase):
         Y = Ndsparse(Ynp)
 
         Znp = np.kron(Xnp, Ynp)
-        Z = X.kronecker_product(Y)
+        Z = kronecker_product(X, Y)
         self.assertEqual(Z.shape, (12, 6))
         Znp2 = Z.to_np()
         self.assertTrue(np.allclose(Znp, Znp2))
