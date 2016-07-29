@@ -232,7 +232,7 @@ class Ndsparse:
         """
         if permutation is None:
             if self.d == 2:
-                permutation = (1,0)
+                permutation = (1, 0)
             else:
                 raise ValueError('A permutation must be supplied for ndim > 2')
 
@@ -273,25 +273,38 @@ def get_entries_shape(entries):
 
 def matrix_product(mat1, mat2):
     """
-    Standard 2-d matrix multiply using ttt
+    Standard 2-d matrix multiply
     """
-    assert mat1.d == 2 and mat2.d == 2, 'Matrices must both be 2-d for usual multiplication.'
-    return ttt(mat1, mat2, [1], [0])
+    if mat1.d != 2 or mat2.d != 2:
+        raise ValueError('Matrices must both be 2-d for usual matrix multiplication')
+    return ttt(mat1, (0, -1), mat2, (-1, 1))
+
+
+def inner_product(mat1, mat2):
+    """
+    Standard 1-d vector inner product
+    """
+    if mat1.d != 1 or mat2.d != 1:
+        raise ValueError('Matrices must both be 1-d for usual matrix inner product')
+    return ttt(mat1, (-1,), mat2, (-1,))
 
 
 def outer_product(mat1, mat2):
     """
-    Outer product using ttt
+    Standard 1-d vector outer product
     """
-    return ttt(mat1, mat2)
+    if mat1.d != 1 or mat2.d != 1:
+        raise ValueError('Matrices must both be 1-d for usual matrix outer product')
+    return ttt(mat1, (0,), mat2, (1,))
 
 
 def kronecker_product(mat1, mat2):
     """
     Kronecker product of 2-d matrices using ttt and rearranging indices
     """
-    assert mat1.d == 2 and mat2.d == 2, 'Matrices must both be 2-d for kronecker product.'
-    prod = ttt(mat1, mat2)
+    if mat1.d != 2 or mat2.d != 2:
+        raise ValueError('Matrices must both be 2-d for usual matrix kronecker product')
+    prod = ttt(mat1, (0, 1), mat2, (2, 3))
 
     # Dimensions: self(m x n) (x) other(p x q) = kprod(mp x nq)
     m = mat1.shape[0]
@@ -309,81 +322,87 @@ def kronecker_product(mat1, mat2):
     return Ndsparse(kprod, (m * p, n * q))
 
 
-def ttt(mat1, mat2, *args):
+def ttt(mat1, spec1, mat2, spec2):
     """
-    Tensor x tensor generalized multiplication. Should include inner and outer products and contraction.
-    Specify contraction dims with 1 list of dims in order for self followed by 1 list of dims in order for other
+    Tensor x tensor generalized multiplication/contraction. Contract along the corresponding negative
+    indices in spec1 and spec2, and arrange the product according to the positive indices in spec1 and spec2. Like
+    Einstein notation
 
-    Outer product: Contract on no dims
-    Inner product: Contract on all dims (specify order)
-    Product with contraction on arbitrary dimensions also
+    Special cases:
+        Outer product: Contract on no dims
+        Inner product: Contract on all dims (specify order)
 
-    Result index order: (self_inds\self_dim, other_inds\other_dim)
-    Time complexity: O(self.nnz * other.nnz)
+    Time complexity: O(mat1.nnz * mat2.nnz)
     """
+    # Validate dimensions
+    if mat1.d != len(spec1):
+        raise ValueError("ndims of 1st tensor ({mat1d}) doesn't match specified dims ({spec1d})"
+                         .format(mat1d=mat1.d, spec1d=len(spec1)))
+    if mat2.d != len(spec2):
+        raise ValueError("ndims of 2nd tensor ({mat2d}) doesn't match specified dims ({spec2d})"
+                         .format(mat2d=mat2.d, spec2d=len(spec2)))
 
-    if len(args) == 0:  # no contractions/outer product
-        self_dims = []
-        other_dims = []
-    elif len(args) == 2:  # contractions specified
-        self_dims = args[0]
-        other_dims = args[1]
-        # Error handling: make sure Dims are present, contraction is proper, same lengths
-    else:
-        raise Exception("ttt requires 1 or 3 args.")
+    # Validate contracted dims
+    con_dims_1 = [i for i in spec1 if i < 0]
+    con_dims_2 = [i for i in spec2 if i < 0]
+    if set(con_dims_1) != set(con_dims_2):
+        raise ValueError('Contracted dims (negative indices) must match in both tensors')
+
+    # Validate kept dims
+    keep_dims_1 = [i for i in spec1 if i >= 0]
+    keep_dims_2 = [i for i in spec2 if i >= 0]
+    keep_dims = keep_dims_1 + keep_dims_2
+    if sorted(keep_dims) != list(range(len(keep_dims))):
+        raise ValueError('Product dims (positive indices) must contain sequential indices from 0 to remaining dims')
+
+    # Make mapping of contracted dims
+    #   Produce 2 lists: the n-th entry from each list is the n-th dim of that tensor to contract together
+    con_map_1 = []
+    con_map_2 = []
+    for dim in con_dims_1:
+        con_map_1.append(spec1.index(dim))
+        con_map_2.append(spec2.index(dim))
+
+    spec = spec1 + spec2
+    all_shape = mat1.shape + mat2.shape
+    prod_d = len(keep_dims)
+    prod_shape = []
+    for i in range(prod_d):
+        prod_shape.append(all_shape[spec.index(i)])
+    prod_shape = tuple(prod_shape)
 
     # Accumulate nonzero positions
     terms = []  # list of tuples of (pos tuple, val) to sum
 
+    keep_ind = [0]*prod_d
     for pos1, val1 in mat1.entries.items():
 
-        con_ind1s = [item for i, item in enumerate(pos1) if i in self_dims]  # self's contracted indices
-        keep_ind1s = [item for i, item in enumerate(pos1) if i not in self_dims]  # self's kept indices
+        con_ind_1s = [pos1[i] for i in con_map_1]  # mat1's contracted indices
+        for i, ind in enumerate(pos1):  # mat1's kept indices
+            if spec1[i] >= 0:
+                keep_ind[spec1[i]] = ind
 
         for pos2, val2 in mat2.entries.items():
 
-            con_ind2s = [item for i, item in enumerate(pos2) if i in other_dims]  # other's contracted indices
-            keep_ind2s = [item for i, item in enumerate(pos2) if i not in other_dims]  # other's kept indices
+            con_ind_2s = [pos2[i] for i in con_map_2]  # mat2's contracted indices
+            for i, ind in enumerate(pos2):  # mat2's kept indices
+                if spec2[i] >= 0:
+                    keep_ind[spec2[i]] = ind
 
-            pos = tuple(keep_ind1s + keep_ind2s)
-
-            if con_ind1s == con_ind2s:  # Match entries that share contraction index (including none)
-                terms.append((pos, val1 * val2))
+            if con_ind_1s == con_ind_2s:  # Match entries that share contraction index (including none)
+                terms.append((tuple(keep_ind), val1 * val2))
 
     # Sum entries
-    out = {}
+    prod_entries = {}
     for entry in terms:
         pos = entry[0]
         val = entry[1]
-        if pos not in out:
-            out[pos] = val
+        if pos not in prod_entries:
+            prod_entries[pos] = val
         else:
-            out[pos] += val
+            prod_entries[pos] += val
 
-    shape = [item for i, item in enumerate(mat1.shape) if i not in self_dims] + \
-            [item for i, item in enumerate(mat2.shape) if i not in other_dims]
-    return Ndsparse(out, tuple(shape))
+    # shape = [item for i, item in enumerate(mat1.shape) if i not in spec1] + \
+    #         [item for i, item in enumerate(mat2.shape) if i not in spec2]
+    return Ndsparse(prod_entries, prod_shape)
 
-
-# Testing code
-if __name__ == "__main__":
-    Al = [[[1, 7, 3], [2, 8, 4]], [[3, 9, 5], [4, 0, 6]], [[5, 1, 7], [6, 2, 8]], [[0, 1, 9], [1, 0, 3]]]
-    Bl = [[[5, 1], [7, 0], [8, 4], [0, 4]], [[0, 3], [1, 5], [9, 6], [1, 2]], [[4, 9], [3, 8], [6, 7], [2, 0]]]
-    print(Al)
-    print(Bl)
-    A = Ndsparse(Al)
-    B = Ndsparse(Bl)
-    print(A)
-    print(B)
-    print(A.shape)
-    print(B.shape)
-    # C = A.outerProduct(B)
-    # print C
-    # D = Ndsparse(6)
-    # print D
-    # E = A.outerProduct(D)
-    # print E
-    C = A.ttt(B, [0, 1], [1, 2])
-    # C = A.ttt(B)
-    # print C
-    print(C.shape)

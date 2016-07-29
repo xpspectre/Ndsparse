@@ -15,8 +15,35 @@ class TestNdsparse(unittest.TestCase):
         Yl = [[[5, 1], [7, 0], [8, 4], [0, 4]], [[0, 3], [1, 5], [9, 6], [1, 2]], [[4, 9], [3, 8], [6, 7], [2, 0]]]
         self.Y = Ndsparse(Yl)
 
-        self.Anp = np.array([[[1, 7, 3], [2, 8, 4]], [[3, 9, 5], [4, 0, 6]], [[5, 1, 7], [6, 2, 8]], [[0, 1, 9], [1, 0, 3]]])
-        self.Bnp = np.array([[[5, 1], [7, 0], [8, 4], [0, 4]], [[0, 3], [1, 5], [9, 6], [1, 2]], [[4, 9], [3, 8], [6, 7], [2, 0]]])
+        self.Gnp = np.array([[[1, 7, 3], [2, 8, 4]], [[3, 9, 5], [4, 0, 6]], [[5, 1, 7], [6, 2, 8]], [[0, 1, 9], [1, 0, 3]]])
+        self.Hnp = np.array([[[5, 1], [7, 0], [8, 4], [0, 4]], [[0, 3], [1, 5], [9, 6], [1, 2]], [[4, 9], [3, 8], [6, 7], [2, 0]]])
+
+        # For comparing to Matlab implementation
+        a = np.zeros((4, 2, 3))
+        a[:, :, 0] = [[1, 2],
+                      [3, 4],
+                      [5, 6],
+                      [0, 1]]
+        a[:, :, 1] = [[7, 8],
+                      [9, 0],
+                      [1, 2],
+                      [1, 0]]
+        a[:, :, 2] = [[3, 4],
+                      [5, 6],
+                      [7, 8],
+                      [9, 3]]
+
+        b = np.zeros((3, 4, 2))
+        b[:, :, 0] = [[5, 7, 8, 0],
+                      [0, 1, 9, 1],
+                      [4, 3, 6, 2]]
+        b[:, :, 1] = [[1, 0, 4, 4],
+                      [3, 5, 6, 2],
+                      [9, 8, 7, 0]]
+        self.a = a
+        self.b = b
+        self.A = Ndsparse(a)
+        self.B = Ndsparse(b)
 
     # Test construction
     def test_construct_blank(self):
@@ -53,17 +80,17 @@ class TestNdsparse(unittest.TestCase):
         self.assertEqual(len(Y.entries), 4)
 
     def test_construct_from_ndarray(self):
-        Anp = self.Anp
-        A = Ndsparse(Anp)
-        self.assertEqual(A.d, len(Anp.shape))
-        self.assertEqual(A.shape, Anp.shape)
-        self.assertEqual(len(A.entries), np.count_nonzero(Anp))
+        Gnp = self.Gnp
+        G = Ndsparse(Gnp)
+        self.assertEqual(G.d, len(Gnp.shape))
+        self.assertEqual(G.shape, Gnp.shape)
+        self.assertEqual(len(G.entries), np.count_nonzero(Gnp))
 
-        Bnp = self.Bnp
-        B = Ndsparse(Bnp)
-        self.assertEqual(B.d, len(Bnp.shape))
-        self.assertEqual(B.shape, Bnp.shape)
-        self.assertEqual(len(B.entries), np.count_nonzero(Bnp))
+        Hnp = self.Hnp
+        H = Ndsparse(Hnp)
+        self.assertEqual(H.d, len(Hnp.shape))
+        self.assertEqual(H.shape, Hnp.shape)
+        self.assertEqual(len(H.entries), np.count_nonzero(Hnp))
 
     def test_construct_from_lists(self):
         X = self.X
@@ -153,6 +180,24 @@ class TestNdsparse(unittest.TestCase):
         Z = X * Y
         Znp2 = Z.to_np()
         self.assertTrue(np.allclose(Znp, Znp2))
+
+    def test_ttt(self):
+        a = self.a
+        b = self.b
+        c1 = np.tensordot(a, b, axes=([0, 1], [1, 2]))
+        c2 = np.tensordot(a, b, axes=([2, 1], [0, 2])).T  # kept dims are in order they appear, so transpose
+        c3 = np.tensordot(b, b, axes=([2, 1], [2, 1])).T
+
+        A = self.A
+        B = self.B
+        C1 = ttt(A, (-1, -2, 0), B, (1, -1, -2))
+        C2 = ttt(A, (1, -2, -1), B, (-1, 0, -2))
+        C3 = ttt(B, (1, -2, -1), B, (0, -2, -1))
+        self.assertTrue(np.allclose(C1.to_np(), c1))
+        self.assertTrue(np.allclose(C2.to_np(), c2))
+        self.assertTrue(np.allclose(C3.to_np(), c3))
+
+        # Also some easier tests with vectors and matrices
 
     def test_matrix_multiply(self):
         Xnp = np.random.rand(4, 3)
