@@ -374,35 +374,34 @@ def ttt(mat1, spec1, mat2, spec2):
     # Accumulate nonzero positions
     terms = []  # list of tuples of (pos tuple, val) to sum
 
-    keep_ind = [0]*prod_d
+    keep_pos = [0]*prod_d  # keeps track of current pos
     for pos1, val1 in mat1.entries.items():
 
         con_ind_1s = [pos1[i] for i in con_map_1]  # mat1's contracted indices
         for i, ind in enumerate(pos1):  # mat1's kept indices
             if spec1[i] >= 0:
-                keep_ind[spec1[i]] = ind
+                keep_pos[spec1[i]] = ind
 
         for pos2, val2 in mat2.entries.items():
 
             con_ind_2s = [pos2[i] for i in con_map_2]  # mat2's contracted indices
             for i, ind in enumerate(pos2):  # mat2's kept indices
                 if spec2[i] >= 0:
-                    keep_ind[spec2[i]] = ind
+                    keep_pos[spec2[i]] = ind
 
             if con_ind_1s == con_ind_2s:  # Match entries that share contraction index (including none)
-                terms.append((tuple(keep_ind), val1 * val2))
+                terms.append((tuple(keep_pos), val1 * val2))
+                # (make sure that the keep_pos list is copied into a tuple, instead of its reference being copied)
 
     # Sum entries
     prod_entries = {}
-    for entry in terms:
-        pos = entry[0]
-        val = entry[1]
+    for term in terms:
+        pos = term[0]
+        val = term[1]
         if pos not in prod_entries:
             prod_entries[pos] = val
         else:
             prod_entries[pos] += val
 
-    # shape = [item for i, item in enumerate(mat1.shape) if i not in spec1] + \
-    #         [item for i, item in enumerate(mat2.shape) if i not in spec2]
     return Ndsparse(prod_entries, prod_shape)
 
