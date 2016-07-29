@@ -159,6 +159,13 @@ class Ndsparse:
         else:
             self.entries[index] = value
 
+    def to_np(self):
+        """Convert to dense numpy.array"""
+        array = np.zeros(self.shape)
+        for pos, val in self.entries.items():
+            array[pos] = val
+        return array
+
     def __eq__(self, other):
         """
         Test equality of 2 Ndsparse objects by value. Must have the same nonzero elements, rank, and dimensions.
@@ -248,7 +255,7 @@ class Ndsparse:
             j = q * pos[1] + pos[3] + 1
             kprod[(i - 1, j - 1)] = val
 
-        return Ndsparse(kprod, [m * p, n * q])
+        return Ndsparse(kprod, (m * p, n * q))
 
     def ttt(self, other, *args):
         """
@@ -303,9 +310,9 @@ class Ndsparse:
 
         shape = [item for i, item in enumerate(self.shape) if i not in self_dims] + \
                 [item for i, item in enumerate(other.shape) if i not in other_dims]
-        return Ndsparse(out, shape)
+        return Ndsparse(out, tuple(shape))
 
-    def transpose(self, permutation):
+    def transpose(self, permutation=None):
         """
         Transpose Ndsparse matrix in place
         permutation: tuple of new indices
@@ -313,13 +320,20 @@ class Ndsparse:
            the permutation (N,1,....0) or whatever, with N! possible permutations
         Note indexing starts at 0
         """
-        # Error handling: make sure permutation is valid (eg, has right length)
-        # Useful extension: default transpose for N=2 matrices
+        if permutation is None:
+            if self.d == 2:
+                permutation = (1,0)
+            else:
+                raise ValueError('A permutation must be supplied for ndim > 2')
+
+        if len(permutation) != self.d:
+            raise ValueError('The permutation must match the matrix dimensions')
+
         out = {}
         for key, value in self.entries.items():
             out[permute(key, permutation)] = value
         self.entries = out
-        self.shape = list(permute(self.shape, permutation))
+        self.shape = permute(self.shape, permutation)
 
     def reshape(self, shapemat):
         """
@@ -369,9 +383,3 @@ if __name__ == "__main__":
     # C = A.ttt(B)
     # print C
     print(C.shape)
-    Gl = [[1, 2], [3, 4]]
-    Hl = [[0, 5], [6, 7]]
-    G = Ndsparse(Gl)
-    H = Ndsparse(Hl)
-    print(G.matrix_product(G))
-    print(G.kronecker_product(H))

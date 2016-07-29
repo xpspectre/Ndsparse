@@ -113,7 +113,78 @@ class TestNdsparse(unittest.TestCase):
         X = self.X
         self.assertEqual(X.nnz(), 21)
 
+    def test_to_np(self):
+        Xnp = np.random.rand(4, 2, 3)
+        X = Ndsparse(Xnp)
+        Xnp2 = X.to_np()
+        self.assertTrue(np.array_equal(Xnp, Xnp2))
+
     # Test tensor operations
+    def test_add(self):
+        Xnp = np.random.rand(4, 2, 3)
+        Ynp = np.random.rand(4, 2, 3)
+        X = Ndsparse(Xnp)
+        Y = Ndsparse(Ynp)
+
+        Znp = Xnp + Ynp
+        Z = X + Y
+        Znp2 = Z.to_np()
+        self.assertTrue(np.allclose(Znp, Znp2))
+
+    def test_subtract(self):
+        Xnp = np.random.rand(4, 2, 3)
+        Ynp = np.random.rand(4, 2, 3)
+        X = Ndsparse(Xnp)
+        Y = Ndsparse(Ynp)
+
+        Znp = Xnp - Ynp
+        Z = X - Y
+        Znp2 = Z.to_np()
+        self.assertTrue(np.allclose(Znp, Znp2))
+
+    def test_multiply(self):
+        # Element-wise multiply
+        Xnp = np.random.rand(4, 2, 3)
+        Ynp = np.random.rand(4, 2, 3)
+        X = Ndsparse(Xnp)
+        Y = Ndsparse(Ynp)
+
+        Znp = Xnp * Ynp
+        Z = X * Y
+        Znp2 = Z.to_np()
+        self.assertTrue(np.allclose(Znp, Znp2))
+
+    def test_matrix_multiply(self):
+        Xnp = np.random.rand(4, 3)
+        Ynp = np.random.rand(3, 2)
+        X = Ndsparse(Xnp)
+        Y = Ndsparse(Ynp)
+
+        Znp = np.dot(Xnp, Ynp)
+        Z = X.matrix_product(Y)
+        self.assertEqual(Z.shape, (4, 2))
+        Znp2 = Z.to_np()
+        self.assertTrue(np.allclose(Znp, Znp2))
+
+    def test_kronecker_product(self):
+        Xnp = np.random.rand(4, 3)
+        Ynp = np.random.rand(3, 2)
+        X = Ndsparse(Xnp)
+        Y = Ndsparse(Ynp)
+
+        Znp = np.kron(Xnp, Ynp)
+        Z = X.kronecker_product(Y)
+        self.assertEqual(Z.shape, (12, 6))
+        Znp2 = Z.to_np()
+        self.assertTrue(np.allclose(Znp, Znp2))
+
+    def test_transpose(self):
+        Xnp = np.random.rand(5, 3)
+        X = Ndsparse(Xnp)  # in-place
+
+        Xnpt = Xnp.T
+        X.transpose()
+        self.assertEqual(X.shape, Xnpt.shape)
 
 
 if __name__ == '__main__':
