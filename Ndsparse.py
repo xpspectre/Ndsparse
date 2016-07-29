@@ -1,3 +1,7 @@
+import numpy as np
+from numbers import Number
+
+
 class Ndsparse:
     """
     N-dimensional sparse matrix.
@@ -12,19 +16,21 @@ class Ndsparse:
         Constructor
         Ndsparse(scalar)
         Ndsparse(dict of (pos):val pairs, optional list of dims for shape)
-        Ndsparse(nested list dense representation)
+        Ndsparse(other Ndsparse)
+        Ndsparse(numpy.array)
+        Ndsparse(nested lists)
         """
         # Blank Ndsparse
         if len(args) == 0:
             self.entries = {}
             self.d = 0
-            self.shape = []
+            self.shape = ()
 
         # From a single scalar
         elif isinstance(args[0], (int, float, complex)):
             self.entries = {(): args[0]}
             self.d = 0
-            self.shape = []
+            self.shape = ()
 
         # From dict of pos,val pairs
         #   Make sure a new dict is produced for the Ndsparse
@@ -43,7 +49,7 @@ class Ndsparse:
                     raise IndexError('Position indices must be integers')
                 if len(pos) != d:
                     raise IndexError('Position index dimension mismatch')
-                if not isinstance(val, (int, float, complex)):
+                if not isinstance(val, Number):
                     raise ValueError('Values must be numbers')
                 self.entries[pos] = val
                 ctr += 1
@@ -55,15 +61,23 @@ class Ndsparse:
             else:
                 self.shape = get_entries_shape(entries)
 
-        # From list of lists (of lists...) dense format
-        # 1st dim = rows, 2nd dim = cols, 3rd dim = pages, ...
-        elif args[0].__class__.__name__ == 'list':
-            self.entries = build_entries_dict_from_nested_lists(args[0])
-            self.d = len(next(iter(self.entries.keys())))
-            self.shape = get_lists_shape(args[0])
+        # From numpy array or list of lists (of lists...) dense format
+        #   1st dim = rows, 2nd dim = cols, 3rd dim = pages, ...
+        #   Uses a numpy array as an intermediate when constructing from lists for convenience
+        #   Note that for now, values are converted to floats
+        elif args[0].__class__.__name__ == 'ndarray' or args[0].__class__.__name__ == 'list':
+            if args[0].__class__.__name__ == 'list':
+                array = np.array(args[0])
+            else:
+                array = args[0]
 
-        elif args[0].__class__.__name__ == 'ndarray':
-            raise NotImplementedError
+            self.entries = {}
+            it = np.nditer(array, flags=['multi_index'])
+            while not it.finished:
+                self.entries[it.multi_index] = float(it[0])
+                it.iternext()
+            self.shape = array.shape
+            self.d = len(self.shape)
 
         # Catch unsupported initialization
         else:
@@ -321,67 +335,6 @@ def permute(vec, permutation):
     return tuple([vec[permutation[i]] for i in range(len(vec))])
 
 
-def traverse_with_indices(super_list, tree_types=(list, tuple)):
-    """
-    Traverse over tree structure (nested lists), with indices. Returns a nested list 
-    with the left element a nested list and the right element the next position.
-    Call flatten to get into a nice form.
-    """
-    inds = []
-    if isinstance(super_list, tree_types):
-        for ind, value in enumerate(super_list):
-            inds = inds[0:-1]
-            inds.append(ind)
-            for subValue in traverse_with_indices(value):
-                yield [subValue, inds]
-    else:
-        yield [super_list, inds]
-
-
-def flatten(super_list, tree_types=(list, tuple)):
-    """
-    Flatten arbitrarily nested lists into a single list, removing empty lists.
-    """
-    flat_list = []
-    for subList in super_list:
-        if isinstance(subList, tree_types):
-            flat_list.extend(flatten(subList))
-        else:
-            flat_list.append(subList)
-    return flat_list
-
-
-def build_entries_dict_from_nested_lists(nested_lists):
-    """
-    Build dict of pos:val pairs for Ndsparse.entries format from a flat list where list[0] is
-    the val and list[1:-1] are the pos indices in reverse order.
-    """
-    # Special case for scalar in a list
-    #    Warning: first dim shouldn't be singleton
-    if len(nested_lists) == 1:
-        return {(): nested_lists[0]}
-
-    entries_dict = {}
-    for entry in traverse_with_indices(nested_lists):
-        flat_entry = flatten(entry)
-        pos = tuple(flat_entry[-1:0:-1])
-        val = flat_entry[0]
-        entries_dict[pos] = val
-    return entries_dict
-
-
-def get_lists_shape(nested_lists, tree_types=(list, tuple)):
-    """
-    Get dimensions of nested lists
-    """
-    shape = []
-    lst = list(nested_lists)
-    while isinstance(lst, tree_types):
-        shape.append(len(lst))
-        lst = lst[0]
-    return shape
-
-
 def get_entries_shape(entries):
     """
     Get dimensions corresponding to max indices in entries
@@ -391,7 +344,7 @@ def get_entries_shape(entries):
         for i, ind in enumerate(pos):
             if ind > max_inds[i]:
                 max_inds[i] = ind
-    return [ind + 1 for ind in max_inds]
+    return tuple([ind + 1 for ind in max_inds])
 
 
 # Testing code

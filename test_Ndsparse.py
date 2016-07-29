@@ -22,7 +22,7 @@ class TestNdsparse(unittest.TestCase):
     def test_construct_blank(self):
         X = Ndsparse()
         self.assertEqual(X.d, 0)
-        self.assertEqual(X.shape, [])
+        self.assertEqual(X.shape, ())
         self.assertEqual(len(X.entries), 0)
 
     def test_construct_scalar(self):
@@ -30,44 +30,58 @@ class TestNdsparse(unittest.TestCase):
         Xl = {(): random()}
         X = Ndsparse(Xl)
         self.assertEqual(X.d, 0)
-        self.assertEqual(X.shape, [])
+        self.assertEqual(X.shape, ())
         self.assertEqual(len(X.entries), 1)
 
         Yl = random()
         Y = Ndsparse(Yl)
         self.assertEqual(Y.d, 0)
-        self.assertEqual(Y.shape, [])
+        self.assertEqual(Y.shape, ())
         self.assertEqual(len(Y.entries), 1)
-
-        Zl = [random()]
-        Z = Ndsparse(Zl)
-        self.assertEqual(X.d, 0)
-        self.assertEqual(X.shape, [])
-        self.assertEqual(len(X.entries), 1)
 
     def test_construct_from_dict(self):
         Xd = {(0, 0): 1, (2, 1): 3, (1, 2): 2}
         X = Ndsparse(Xd)
         self.assertEqual(X.d, 2)
-        self.assertEqual(X.shape, [3, 3])
+        self.assertEqual(X.shape, (3, 3))
         self.assertEqual(len(X.entries), 3)
 
         Yd = {(1, 0): 1, (2, 0): 3, (0, 1): 1, (0, 2): 2}
         Y = Ndsparse(Yd)
         self.assertEqual(Y.d, 2)
-        self.assertEqual(Y.shape, [3, 3])
+        self.assertEqual(Y.shape, (3, 3))
         self.assertEqual(len(Y.entries), 4)
+
+    def test_construct_from_ndarray(self):
+        Anp = self.Anp
+        A = Ndsparse(Anp)
+        self.assertEqual(A.d, len(Anp.shape))
+        self.assertEqual(A.shape, Anp.shape)
+        self.assertEqual(len(A.entries), np.count_nonzero(Anp))
+
+        Bnp = self.Bnp
+        B = Ndsparse(Bnp)
+        self.assertEqual(B.d, len(Bnp.shape))
+        self.assertEqual(B.shape, Bnp.shape)
+        self.assertEqual(len(B.entries), np.count_nonzero(Bnp))
 
     def test_construct_from_lists(self):
         X = self.X
         self.assertEqual(X.d, 3)
-        self.assertEqual(X.shape, [4, 2, 3])
+        self.assertEqual(X.shape, (4, 2, 3))
         self.assertEqual(len(X.entries), 4 * 3 * 2 - 3)  # 3 zeros in Xl
 
         Y = self.Y
         self.assertEqual(Y.d, 3)
-        self.assertEqual(Y.shape, [3, 4, 2])
+        self.assertEqual(Y.shape, (3, 4, 2))
         self.assertEqual(len(Y.entries), 3 * 4 * 2 - 4)  # 4 zeros in Yl
+
+        # Corner case of single element in a vector (1-d array)
+        Zl = [random()]
+        Z = Ndsparse(Zl)
+        self.assertEqual(Z.d, 1)
+        self.assertEqual(Z.shape, (1,))
+        self.assertEqual(len(Z.entries), 1)
 
     def test_construct_from_Ndsparse(self):
         X = self.X
